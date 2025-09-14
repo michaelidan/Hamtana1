@@ -1,39 +1,64 @@
-# =============================================
-# Email: michael9090124@gmail.com
-# Makefile — v4 (Console + GUI via SFML)
-# =============================================
-CXX := g++
-CXXFLAGS := -std=gnu++17 -O2 -Wall -Wextra -Wpedantic -Iinclude
-LDFLAGS := 
+# Emails: ronavraham1999@gmail.com_michael9090124@gmail.com
+# Makefile — Coup v5 (tests always run with vendored doctest)
 
-SRC_ALL := $(wildcard src/*.cpp)
-SRC_CORE := $(filter-out src/Main.cpp src/GuiMain.cpp,$(SRC_ALL))
-OBJ_CORE := $(SRC_CORE:.cpp=.o)
+CXX      ?= g++
+CXXFLAGS ?= -std=gnu++17 -O2 -Wall -Wextra -Wpedantic -Iinclude -Itests
 
-.PHONY: all Main run gui test valgrind clean
+OBJS := src/Game.o src/Player.o
 
-all: run
+.PHONY: all run gui Gui test valgrind clean
 
-Main: $(OBJ_CORE) src/Main.cpp
-	$(CXX) $(CXXFLAGS) -o Main src/Main.cpp $(OBJ_CORE) $(LDFLAGS)
+# ברירת מחדל: לבנות את הדמו הקונסולי
+all: Main
+	@echo "Built Main."
+	@echo "Run demo: make run"
+	@echo "GUI (optional): make gui"
+	@echo "Tests: make test"
+
+# ליבת המשחק
+src/Game.o: src/Game.cpp include/Game.hpp include/Player.hpp include/Role.hpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+src/Player.o: src/Player.cpp include/Player.hpp include/Role.hpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+# דמו קונסולי
+Main: src/Main.cpp $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $@ $^
 
 run: Main
 	./Main
 
-Gui: $(OBJ_CORE) src/GuiMain.cpp
-	$(CXX) $(CXXFLAGS) -o Gui src/GuiMain.cpp $(OBJ_CORE) -lsfml-graphics -lsfml-window -lsfml-system
-
-gui: Gui
-	./Gui
-
-tests/test_runner: $(OBJ_CORE) tests/test_core.cpp
-	$(CXX) $(CXXFLAGS) -o tests/test_runner tests/test_core.cpp $(OBJ_CORE) $(LDFLAGS)
+# --- טסטים (מחייבים doctest.h המקומי) ---
+tests/test_runner: tests/test_core.cpp $(OBJS) tests/doctest/doctest.h
+	$(CXX) $(CXXFLAGS) -o $@ tests/test_core.cpp $(OBJS)
 
 test: tests/test_runner
 	./tests/test_runner
 
-valgrind: Main
-	valgrind --leak-check=full ./Main || true
+# GUI — ננסה לקשר מול SFML; אם אין ספריות/כותרות, נדלג בלי להפיל את כלל הבנייה
+gui: Gui
 
+# גילוי נאות - זה GPT כתב.
+Gui: src/GuiMain.cpp $(OBJS)
+	@echo "Attempting to build GUI..."
+	@set -e; \
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lsfml-graphics -lsfml-window -lsfml-system 2>/tmp/gui_err.$$ || true; \
+	if [ -x ./Gui ]; then \
+	  echo "GUI built: ./Gui"; \
+	else \
+	  echo "GUI skipped (SFML not available). To enable: sudo apt install libsfml-dev"; \
+	  rm -f ./Gui; \
+	fi; \
+	rm -f /tmp/gui_err.$$
+# גילוי נאות - עד כאן GPT כתב.
+
+# Valgrind (אופציונלי)
+valgrind: Main
+	valgrind --leak-check=full --error-exitcode=1 ./Main
+
+# ניקוי
 clean:
-	rm -f $(OBJ_CORE) Main Gui tests/test_runner
+	rm -f src/Game.o src/Player.o Main Gui tests/test_runner
+	rm -rf logs
+
