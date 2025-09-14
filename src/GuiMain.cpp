@@ -260,44 +260,71 @@ int main(){
 
 
     // רצף חסימה אינטראקטיבי: מציג מועמד/ת סמכות ושואל אם לחסום
-    auto runBlockSequenceThen = [&](Action a, std::function<void()> perform){
-        auto auth = g.authorityListFor(a); size_t idx=0;
-        while(idx<auth.size()){
-            Player* cand = auth[idx]; bool decided=false, wantBlock=false;
-            while(win.isOpen() && !decided){
-                sf::Event ev; 
-                while(win.pollEvent(ev)){
-                    if(ev.type==sf::Event::Closed){ win.close(); return; }
-                    if(ev.type==sf::Event::MouseButtonPressed){
+    auto runBlockSequenceThen = [&](Action a, std::function<void()> perform)
+    {
+        // 1) לבנות רשימת חוסמים כשירים בלבד
+        std::vector<Player*> auth = g.authorityListFor(a);
+        std::vector<Player*> eligible;
+        Player* actor = &g.current();
+
+        for (auto* cand : auth) {
+            if (!cand || !cand->alive) continue;
+            if (cand == actor) continue;                 // לא שואלים את מבצע הפעולה לחסום את עצמו
+
+            if (a == Action::Coup) {                     // גנרל צריך 5 מטבעות כדי לחסום Coup
+                if (!cand->isGeneral()) continue;
+                if (cand->coins < 5) continue;
+            }
+            // Tax/Bribe: אין תנאי מטבעות; הרשימה כבר מסוננת לפי תפקיד ע"י authorityListFor
+            eligible.push_back(cand);
+        }
+
+        // אם אין חוסם כשיר — מבצעים מיד את הפעולה בלי לשאול אף אחד
+        if (eligible.empty()) { perform(); return; }
+
+        // 2) דיאלוג חסימה סדרתי עד שמישהו חוסם או שנגמרים המועמדים
+        size_t idx = 0;
+        while (idx < eligible.size())
+        {
+            Player* cand = eligible[idx];
+            bool decided = false, wantBlock = false;
+
+            while (win.isOpen() && !decided)
+            {
+                sf::Event ev;
+                while (win.pollEvent(ev))
+                {
+                    if (ev.type == sf::Event::Closed) { win.close(); return; }
+                    if (ev.type == sf::Event::MouseButtonPressed)
+                    {
                         auto mp = win.mapPixelToCoords({ev.mouseButton.x, ev.mouseButton.y});
-                        sf::FloatRect rYes(560,300,120,44), rNo(700,300,120,44);
-                        if(rYes.contains(mp)){ wantBlock=true; decided=true; }
-                        if(rNo.contains(mp)) { wantBlock=false; decided=true; }
+                        sf::FloatRect rYes(560, 300, 120, 44), rNo(700, 300, 120, 44);
+                        if (rYes.contains(mp)) { wantBlock = true;  decided = true; }
+                        if (rNo.contains(mp))  { wantBlock = false; decided = true; }
                     }
                 }
-                win.clear(sf::Color(20,20,30));
-                // רשימת שחקנים משמאל
-                float y0=20; 
-                for(size_t i=0;i<g.players_.size();++i){ 
-                    auto& up=g.players_[i]; if(!up->alive) continue;
-                    sf::RectangleShape row({380.f,34.f}); row.setPosition(20,y0);
-                    row.setFillColor((int)i==selectedIndex?sf::Color(70,70,90):sf::Color(40,40,60)); 
-                    std::string role = up->role?up->role->name():"?";
-                    auto t=makeText(up->name+" ("+role+") - coins: "+std::to_string(up->coins)+(i==g.turnIndex?"  (TURN)":"") ,16, fontOK?&font:nullptr); 
-                    t.setPosition(30,y0+6);
 
-                    // שחקן שבתורו עכשיו — מסגרת ירוקה
-                    if ((int)i == g.turnIndex) {
-                        row.setOutlineThickness(3.f);
-                        row.setOutlineColor(sf::Color(80,160,80));
-                    } else {
-                        row.setOutlineThickness(0.f);
-                    }
+                // ציור דיאלוג / רשימת שחקנים
+                win.clear(sf::Color(20, 20, 30));
 
+                float y0 = 20;
+                for (size_t i = 0; i < g.players_.size(); ++i)
+                {
+                    auto& up = g.players_[i];
+                    if (!up->alive) continue;
+
+                    sf::RectangleShape row({380.f, 34.f});
+                    row.setPosition(20, y0);
+                    row.setFillColor((int)i == selectedIndex ? sf::Color(70, 70, 90) : sf::Color(40, 40, 60));
+                    if ((int)i == g.turnIndex) { row.setOutlineThickness(3.f); row.setOutlineColor(sf::Color(80,160,80)); }
+                    else                        { row.setOutlineThickness(0.f); }
                     win.draw(row);
+
+                    std::string role = up->role ? up->role->name() : "?";
+                    auto t = makeText(up->name + " (" + role + ") - coins: " + std::to_string(up->coins) + (i == g.turnIndex ? "  (TURN)" : ""), 16, fontOK?&font:nullptr);
+                    t.setPosition(30, y0 + 6);
                     win.draw(t);
 
-                    // תגי סטטוסים
                     if (up->sanctionActive) {
                         auto badge = makeText("SANCTIONED", 14, fontOK?&font:nullptr);
                         badge.setFillColor(sf::Color(200, 40, 40));
@@ -306,31 +333,38 @@ int main(){
                     }
                     if (up->jamActive) {
                         auto badge2 = makeText("JAMMED", 14, fontOK?&font:nullptr);
-                        badge2.setFillColor(sf::Color(200,200,40));
+                        badge2.setFillColor(sf::Color(200, 200, 40));
                         float dy = up->sanctionActive ? 24.f : 0.f;
                         badge2.setPosition(320, y0 + 6 + dy);
                         win.draw(badge2);
                     }
 
-                    y0+=40;
+                    y0 += 40;
                 }
-                // טקסט הדיאלוג
-                std::string actor = g.current().name;
-                std::string candrole = cand->role?cand->role->name():"?";
-                auto msg = makeText(candrole+" "+cand->name+": Block "+to_string(a)+" by "+actor+"?", 22, fontOK?&font:nullptr);
-                msg.setPosition(420,220); win.draw(msg);
-                // כפתורים
-                sf::RectangleShape yes({120.f,44.f}); yes.setPosition(560,300); yes.setFillColor(sf::Color(80,140,80));
-                sf::RectangleShape no ({120.f,44.f}); no .setPosition(700,300); no .setFillColor(sf::Color(120,80,80));
+
+                std::string actorName = actor->name;
+                std::string candrole  = cand->role ? cand->role->name() : "?";
+                auto msg = makeText(candrole + " " + cand->name + ": Block " + to_string(a) + " by " + actorName + "?", 22, fontOK?&font:nullptr);
+                msg.setPosition(420, 220);
+                win.draw(msg);
+
+                sf::RectangleShape yes({120.f, 44.f}); yes.setPosition(560, 300); yes.setFillColor(sf::Color(80, 140, 80));
+                sf::RectangleShape no ({120.f, 44.f}); no .setPosition(700, 300); no .setFillColor(sf::Color(120, 80, 80));
                 win.draw(yes); win.draw(no);
-                auto ty=makeText("Block",18, fontOK?&font:nullptr);      ty.setPosition(595,310); win.draw(ty);
-                auto tn=makeText("Don't block",18, fontOK?&font:nullptr);tn.setPosition(710,310); win.draw(tn);
+                auto ty = makeText("Block",        18, fontOK?&font:nullptr); ty.setPosition(595, 310); win.draw(ty);
+                auto tn = makeText("Don't block", 18, fontOK?&font:nullptr); tn.setPosition(710, 310); win.draw(tn);
+
                 win.display();
             }
-            if(wantBlock){ g.queueBlock(cand->name, a); break; } else { idx++; }
+
+            if (wantBlock) { g.queueBlock(cand->name, a); break; }
+            ++idx;
         }
+
+        // 3) מבצעים את הפעולה (כשיש תור חסימה — עם queueBlock שהוגדר)
         perform();
     };
+
 
     // צביעה ירוק/אפור ועדכון enabled
     auto updateButtons = [&](){
